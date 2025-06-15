@@ -1,6 +1,3 @@
-Here's the document formatted in Markdown, based on the URL you provided and translated into English:
-
----
 
 # Introduction
 
