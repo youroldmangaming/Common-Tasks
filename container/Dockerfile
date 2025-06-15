@@ -10,6 +10,7 @@ RUN for i in 1 2 3; do apt-get update && break || sleep 10; done && \
     ca-certificates \
     curl \
     wget \
+    nginx-full \ 
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install network utilities and nano, ensuring a fresh update
@@ -35,4 +36,6 @@ RUN for i in 1 2 3; do apt-get update && break || sleep 10; done && \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set the default command to run when the container starts
-CMD ["/bin/bash"]
+#CMD ["/bin/bash"]
+
+CMD ["nginx", "-g", "daemon off;"]
