@@ -1,175 +1,287 @@
 #!/bin/bash
 
-# Colima-Incus Setup Script
-# This script installs/updates Colima, Incus, and sets up a Debian container named "trixi"
+# Incus + Colima Setup Script for macOS
+# This script automates the installation and configuration of Incus with Colima
 
 set -e  # Exit on any error
 
-echo "🚀 Starting Colima-Incus setup..."
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-# Function to check if a command exists
+# Configuration
+PROFILE_NAME="incus"
+CPU_COUNT=4
+MEMORY_GB=8
+DISK_GB=100
+
+# Function to print colored output
+print_status() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to check if Homebrew is installed
-check_homebrew() {
+# Function to install Homebrew if not present
+install_homebrew() {
     if ! command_exists brew; then
-        echo "❌ Homebrew is not installed. Please install Homebrew first:"
-        echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        print_status "Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        
+        # Add Homebrew to PATH for current session
+        if [[ -f "/opt/homebrew/bin/brew" ]]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [[ -f "/usr/local/bin/brew" ]]; then
+            eval "$(/usr/local/bin/brew shellenv)"
+        fi
+        
+        print_success "Homebrew installed successfully"
+    else
+        print_status "Homebrew already installed"
+    fi
+}
+
+# Function to install packages
+install_packages() {
+    print_status "Installing Colima and Incus..."
+    
+    # Update Homebrew first
+    brew update
+    
+    # Install required packages
+    brew install colima incus
+    
+    print_success "Colima and Incus installed successfully"
+}
+
+# Function to setup Colima with Incus
+setup_colima() {
+    print_status "Setting up Colima with Incus runtime..."
+    
+    # Check if any colima instance is running
+    if colima status >/dev/null 2>&1; then
+        print_warning "Existing Colima instance detected"
+        
+        # Ask user if they want to delete existing setup
+        echo -n "Do you want to delete the existing Colima setup and start fresh? [y/N]: "
+        read -r response
+        
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            print_status "Stopping and deleting existing Colima setup..."
+            colima stop 2>/dev/null || true
+            echo "y" | colima delete 2>/dev/null || true
+            print_success "Existing setup removed"
+        else
+            print_status "Creating new Incus profile instead..."
+            PROFILE_NAME="incus-$(date +%s)"
+        fi
+    fi
+    
+    # Start Colima with Incus runtime
+    print_status "Starting Colima with Incus runtime (Profile: $PROFILE_NAME)..."
+    print_status "Configuration: CPU=$CPU_COUNT, Memory=${MEMORY_GB}GB, Disk=${DISK_GB}GB"
+    
+    if [[ "$PROFILE_NAME" == "incus" ]] && ! colima status >/dev/null 2>&1; then
+        # Default profile, clean start
+        colima start --runtime incus --cpu "$CPU_COUNT" --memory "$MEMORY_GB" --disk "$DISK_GB"
+    else
+        # Named profile
+        colima start "$PROFILE_NAME" --runtime incus --cpu "$CPU_COUNT" --memory "$MEMORY_GB" --disk "$DISK_GB"
+    fi
+    
+    print_success "Colima started with Incus runtime"
+}
+
+# Function to verify setup
+verify_setup() {
+    print_status "Verifying Incus setup..."
+    
+    # Check Colima status
+    if colima status >/dev/null 2>&1; then
+        print_success "Colima is running"
+        colima status
+    else
+        print_error "Colima is not running"
+        return 1
+    fi
+    
+    # Check Incus remotes
+    print_status "Available Incus remotes:"
+    incus remote list
+    
+    # Get current default remote
+    CURRENT_REMOTE=$(incus remote get-default)
+    print_success "Current default remote: $CURRENT_REMOTE"
+    
+    # Test container creation
+    print_status "Testing container creation..."
+    CONTAINER_NAME="test-$(date +%s)"
+    
+    if incus launch images:alpine/edge "$CONTAINER_NAME" >/dev/null 2>&1; then
+        print_success "Test container '$CONTAINER_NAME' created successfully"
+        
+        # Wait a moment for container to start
+        sleep 3
+        
+        # Show container list
+        print_status "Current containers:"
+        incus list
+        
+        # Clean up test container
+        incus delete "$CONTAINER_NAME" --force >/dev/null 2>&1
+        print_success "Test container cleaned up"
+    else
+        print_error "Failed to create test container"
+        return 1
+    fi
+}
+
+# Function to display usage information
+show_usage() {
+    cat << EOF
+
+${GREEN}Incus + Colima Setup Complete!${NC}
+
+${BLUE}Common Commands:${NC}
+  # Launch a new container
+  incus launch images:debian/13 my-container
+  incus launch images:ubuntu/22.04 ubuntu-container
+  incus launch images:alpine/edge alpine-container
+  
+  # List containers
+  incus list
+  
+  # Shell into a container
+  incus shell my-container
+  
+  # Execute commands in a container
+  incus exec my-container -- ls -la
+  
+  # Stop/start containers
+  incus stop my-container
+  incus start my-container
+  
+  # Delete containers
+  incus delete my-container --force
+
+${BLUE}Colima Management:${NC}
+  # Check Colima status
+  colima status
+  
+  # Stop Colima
+  colima stop$(if [[ "$PROFILE_NAME" != "incus" ]]; then echo " $PROFILE_NAME"; fi)
+  
+  # Start Colima
+  colima start$(if [[ "$PROFILE_NAME" != "incus" ]]; then echo " $PROFILE_NAME"; fi)
+  
+  # List all Colima profiles
+  colima list
+
+${BLUE}Available Image Sources:${NC}
+  images:alpine/edge
+  images:debian/12, images:debian/13
+  images:ubuntu/20.04, images:ubuntu/22.04, images:ubuntu/24.04
+  images:fedora/39, images:fedora/40
+  
+${YELLOW}Note:${NC} Your current Incus remote is: $(incus remote get-default 2>/dev/null || echo "Not available")
+
+EOF
+}
+
+# Main function
+main() {
+    echo -e "${GREEN}=== Incus + Colima Setup Script for macOS ===${NC}"
+    echo
+    
+    # Check if running on macOS
+    if [[ "$(uname)" != "Darwin" ]]; then
+        print_error "This script is designed for macOS only"
         exit 1
     fi
-    echo "✅ Homebrew found"
-}
-
-# Function to update Homebrew
-update_homebrew() {
-    echo "🔄 Updating Homebrew..."
-    brew update
-}
-
-# Function to install or update Incus
-install_incus() {
-    if command_exists incus; then
-        echo "📦 Incus already installed, updating..."
-        brew upgrade incus || echo "⚠️  Incus upgrade failed or no update available"
-    else
-        echo "📦 Installing Incus..."
-        brew install incus
-    fi
-    echo "✅ Incus ready"
-}
-
-# Function to handle Colima installation/update
-install_colima() {
-    local needs_reinstall=false
     
-    if command_exists colima; then
-        echo "📦 Colima already installed"
-        
-        # Check if it's the HEAD version
-        local colima_info=$(brew list --versions colima 2>/dev/null || echo "")
-        if [[ "$colima_info" == *"HEAD"* ]]; then
-            echo "🔄 Updating HEAD version of Colima..."
-            brew uninstall colima
-            needs_reinstall=true
-        else
-            echo "🔄 Switching to HEAD version of Colima..."
-            brew unlink colima 2>/dev/null || true
-            needs_reinstall=true
-        fi
-    else
-        echo "📦 Installing Colima (HEAD version)..."
-        needs_reinstall=true
-    fi
+    # Parse command line arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --profile)
+                PROFILE_NAME="$2"
+                shift 2
+                ;;
+            --cpu)
+                CPU_COUNT="$2"
+                shift 2
+                ;;
+            --memory)
+                MEMORY_GB="$2"
+                shift 2
+                ;;
+            --disk)
+                DISK_GB="$2"
+                shift 2
+                ;;
+            --help)
+                cat << EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --profile NAME    Colima profile name (default: incus)
+  --cpu COUNT       Number of CPUs (default: 4)
+  --memory GB       Memory in GB (default: 8)
+  --disk GB         Disk size in GB (default: 100)
+  --help           Show this help message
+
+Examples:
+  $0
+  $0 --profile my-incus --cpu 6 --memory 12
+  $0 --cpu 2 --memory 4 --disk 50
+EOF
+                exit 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
     
-    if [ "$needs_reinstall" = true ]; then
-        brew install --head colima
-        brew link colima
-    fi
+    print_status "Configuration: Profile=$PROFILE_NAME, CPU=$CPU_COUNT, Memory=${MEMORY_GB}GB, Disk=${DISK_GB}GB"
+    echo
     
-    echo "✅ Colima (HEAD) ready"
-}
-
-# Function to stop Colima if running
-stop_colima() {
-    if colima status >/dev/null 2>&1; then
-        echo "🛑 Stopping existing Colima instance..."
-        colima stop
-    fi
-}
-
-# Function to start Colima with Incus runtime
-start_colima() {
-    echo "🚀 Starting Colima with Incus runtime..."
-    colima start --runtime=incus
-    echo "✅ Colima started with Incus runtime"
-}
-
-# Function to add remote repositories
-add_remotes() {
-    echo "🌐 Adding remote repositories..."
+    # Run setup steps
+    install_homebrew
+    echo
     
-    # Add images remote (if not exists)
-    if ! incus remote list | grep -q "images"; then
-        echo "  Adding images.linuxcontainers.org remote..."
-        incus remote add images https://images.linuxcontainers.org --protocol simplestreams --public
-    else
-        echo "  ✅ Images remote already exists"
-    fi
+    install_packages
+    echo
     
-    # Add Ubuntu remote (if not exists)
-    if ! incus remote list | grep -q "ubuntu"; then
-        echo "  Adding Ubuntu cloud images remote..."
-        incus remote add ubuntu https://cloud-images.ubuntu.com/releases --protocol simplestreams --public
-    else
-        echo "  ✅ Ubuntu remote already exists"
-    fi
+    setup_colima
+    echo
     
-    # Add Debian remote (if not exists)
-    if ! incus remote list | grep -q "debian"; then
-        echo "  Adding Debian cloud images remote..."
-        incus remote add debian https://cdimage.debian.org/images/cloud --protocol simplestreams --public
-    else
-        echo "  ✅ Debian remote already exists"
-    fi
-}
-
-# Function to create trixi container
-create_trixi() {
-    if incus list | grep -q "trixi"; then
-        echo "📋 Container 'trixi' already exists"
-        local status=$(incus list trixi -c s --format csv)
-        if [ "$status" != "RUNNING" ]; then
-            echo "🚀 Starting trixi container..."
-            incus start trixi
-        else
-            echo "✅ Container 'trixi' is already running"
-        fi
-    else
-        echo "📋 Creating Debian 13 container 'trixi'..."
-        incus launch debian:13 trixi
-        echo "✅ Container 'trixi' created and started"
-    fi
-}
-
-# Function to show final status
-show_status() {
-    echo ""
-    echo "🎉 Setup complete!"
-    echo ""
-    echo "📊 Status:"
-    echo "  Colima: $(colima status 2>/dev/null || echo 'Not running')"
-    echo "  Incus containers:"
-    incus list
-    echo ""
-    echo "🔧 To connect to the trixi container:"
-    echo "  incus exec trixi -- bash"
-    echo ""
-    echo "📝 Useful commands:"
-    echo "  colima status          - Check Colima status"
-    echo "  colima stop           - Stop Colima"
-    echo "  incus list            - List all containers"
-    echo "  incus stop trixi      - Stop the trixi container"
-    echo "  incus delete trixi    - Delete the trixi container"
-}
-
-# Main execution
-main() {
-    echo "==============================================="
-    echo "🐳 Colima + Incus + Trixi Setup Script"
-    echo "==============================================="
+    verify_setup
+    echo
     
-    check_homebrew
-    update_homebrew
-    install_incus
-    install_colima
-    stop_colima
-    start_colima
-    add_remotes
-    create_trixi
-    show_status
+    show_usage
+    
+    print_success "Setup completed successfully! 🎉"
 }
 
-# Run main function
+# Run main function with all arguments
 main "$@"
